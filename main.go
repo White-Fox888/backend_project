@@ -15,13 +15,16 @@ type Token struct {
 }
 
 func main() {
-	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-	})
-	http.HandleFunc("/admin/api/v1/auth/login", loginHandler)
+	http.HandleFunc("/login", loginHandler)
 	http.ListenAndServe(":8080", nil)
 }
 
 func loginHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "POST" {
+		http.Error(w, "Метод не разрешен", http.StatusMethodNotAllowed)
+		return
+	}
+
 	var ident Identification
 	err := json.NewDecoder(r.Body).Decode(&ident)
 	if err != nil {
@@ -32,6 +35,6 @@ func loginHandler(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("Успешная авторизация"))
 	} else {
-		http.Error(w, "Code: 401", http.StatusUnauthorized)
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
 	}
 }
