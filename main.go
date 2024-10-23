@@ -41,28 +41,41 @@ func main() {
 	http.HandleFunc("/check", checkHandler)
 	http.HandleFunc("/grants", grantsHandler)
 	http.ListenAndServe(":8080", nil)
-
 }
 
 func loginHandler(w http.ResponseWriter, r *http.Request) {
+	conn, err := pgx.Connect(context.Background(), "postgres://dbgr:2110@localhost:5432/dbgr")
+	if err != nil {
+		fmt.Printf("Unable to connect to database: %v\n", err)
+	}
+	defer conn.Close(context.Background())
+
 	if r.Method != "POST" {
 		w.WriteHeader(http.StatusMethodNotAllowed)
 		return
 	}
 
 	var ident Identification
-	err := json.NewDecoder(r.Body).Decode(&ident)
+	err = json.NewDecoder(r.Body).Decode(&ident)
 	if err != nil {
-		http.Error(w, "Неверный формат данных", http.StatusBadRequest)
+		fmt.Printf("Неверный формат данных: %v", err)
 		return
 	}
 
-	if ident.Login == "admin" && ident.Password == "correct_password" {
-		w.WriteHeader(http.StatusOK)
-	} else {
-		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+	var hashedPassword []byte
+	err = conn.QueryRow(context.Background(), "SELECT password FROM users WHERE login=$1", ident.Login).Scan(&hashedPassword)
+	if err != nil {
+		fmt.Printf("test: %v", err)
 		return
 	}
+
+	var isValid bool
+	err = conn.QueryRow(context.Background(), "SELECT crypt($1, password) = password FROM users WHERE login = $2", ident.Password, ident.Login).Scan(&isValid)
+	if err != nil {
+		fmt.Printf("Unauthorized: %v", err)
+		return
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(TokenTest{Token: authToken})
 }
@@ -81,7 +94,7 @@ func checkHandler(w http.ResponseWriter, r *http.Request) {
 
 	token := authHeader[len("Bearer "):]
 	if token != authToken {
-		http.Error(w, "No Content", http.StatusUnauthorized)
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -90,6 +103,12 @@ func checkHandler(w http.ResponseWriter, r *http.Request) {
 func grantsHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != "GET" {
 		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+
+	authHeader := r.Header.Get("Authorization")
+	if authHeader == "" || !strings.HasPrefix(authHeader, "Bearer ") {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
 		return
 	}
 
@@ -106,10 +125,8 @@ func grantsHandler(w http.ResponseWriter, r *http.Request) {
 	defer rows.Close()
 
 	var grant []TestGrants
-
 	for rows.Next() {
 		var grantItem TestGrants
-
 		if err := rows.Scan(&grantItem.Grants.ID, &grantItem.Grants.Title, &grantItem.Grants.SourceURL, &grantItem.Grants.FilterValues.ProjectDirection, &grantItem.Grants.FilterValues.Amount, &grantItem.Grants.FilterValues.LegalForm, &grantItem.Grants.FilterValues.Age, &grantItem.Grants.FilterValues.CuttingOffCriteria); err != nil {
 			fmt.Printf("Error scanning row: %v", err)
 		}
@@ -121,11 +138,4 @@ func grantsHandler(w http.ResponseWriter, r *http.Request) {
 		fmt.Printf("Error with marshal: %v", err)
 	}
 	fmt.Println(string(json))
-
-	authHeader := r.Header.Get("Authorization")
-	if authHeader == "" || !strings.HasPrefix(authHeader, "Bearer ") {
-		http.Error(w, "Unauthorized", http.StatusUnauthorized)
-		return
-	}
-
 }
