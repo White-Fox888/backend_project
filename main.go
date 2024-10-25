@@ -4,23 +4,31 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"strconv"
 	"strings"
 
+	"github.com/golang-jwt/jwt/v5"
 	"github.com/jackc/pgx/v5"
 )
 
+type Claims struct {
+	jwt.RegisteredClaims
+	Login string `json:"login"`
+}
+
+var mySigningKey = []byte("secret_key")
+
 type Identification struct {
+	Id       int    `json:"id"`
 	Login    string `json:"login"`
 	Password string `json:"password"`
 }
 
-type TokenTest struct {
+type Token struct {
 	Token string `json:"token"`
 }
-
-var authToken = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJFeHAiOiIyMDIzLTEyLTE4VDEyOjI5OjE5LjEwNjg0MTQzOVoiLCJVc2VyTG9naW4iOiJhZG1pbiJ9.0Dvg7vFTrdSX2F4751ae6Id9weC5ATvF1sQPuvejiFE"
 
 type Grant struct {
 	ID           int    `json:"id"`
@@ -98,6 +106,8 @@ type FilterMapping struct {
 
 type FilterOrder []string
 
+var FiltersOrder FilterOrder = FilterOrder{"project_direction", "amount", "legal_form", "age", "cutting_off_criteria"}
+
 type MetaPages struct {
 	CurrentPage int `json:"current_page"`
 	TotalPages  int `json:"total_pages"`
@@ -122,6 +132,53 @@ func main() {
 	http.ListenAndServe(":8080", nil)
 }
 
+func GenerateToken(*Claims) ([]byte, error) {
+	myClaims := &Claims{
+		RegisteredClaims: jwt.RegisteredClaims{},
+		Login:            "admin",
+	}
+
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, myClaims)
+
+	strToken, err := token.SignedString(mySigningKey)
+	if err != nil {
+		fmt.Printf("error signing token: %v", err)
+	}
+
+	TokenJson := Token{Token: strToken}
+
+	json, err := json.Marshal(TokenJson)
+	if err != nil {
+		fmt.Printf("Error with marshal: %v", err)
+	}
+	return json, nil
+}
+
+func ValidateToken(tokenString string) (bool, error) {
+	ValMethod := func(t *jwt.Token) (interface{}, error) {
+		err := t.Method.(*jwt.SigningMethodHMAC)
+		if err != nil {
+			return fmt.Printf("Method Not Allowed: %v", err)
+		}
+		return mySigningKey, nil
+	}
+
+	valClaims := &Claims{
+		RegisteredClaims: jwt.RegisteredClaims{},
+		Login:            "admin",
+	}
+
+	parsedToken, err := jwt.ParseWithClaims(tokenString, valClaims, ValMethod)
+	if err != nil {
+		log.Fatalf("Ошибка разбора: %v", err)
+	}
+	if !parsedToken.Valid {
+		log.Fatalf("Недействительный токен")
+	}
+	return true, nil
+
+}
+
 func loginHandler(w http.ResponseWriter, r *http.Request) {
 	conn, err := pgx.Connect(context.Background(), "postgres://dbgr:2110@localhost:5432/dbgr")
 	if err != nil {
@@ -144,7 +201,7 @@ func loginHandler(w http.ResponseWriter, r *http.Request) {
 	var hashedPassword []byte
 	err = conn.QueryRow(context.Background(), "SELECT password FROM users WHERE login=$1", ident.Login).Scan(&hashedPassword)
 	if err != nil {
-		fmt.Printf("test: %v", err)
+		fmt.Printf("Unindicated: %v", err)
 		return
 	}
 
@@ -155,8 +212,18 @@ func loginHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	myClaims := &Claims{
+		RegisteredClaims: jwt.RegisteredClaims{},
+		Login:            ident.Login,
+	}
+
+	jsonToken, err := GenerateToken(myClaims)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+	}
+
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(TokenTest{Token: authToken})
+	w.Write(jsonToken)
 }
 
 func checkHandler(w http.ResponseWriter, r *http.Request) {
@@ -171,10 +238,13 @@ func checkHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	token := authHeader[len("Bearer "):]
-	if token != authToken {
+	val, err := ValidateToken(authHeader)
+	if !val {
 		http.Error(w, "Unauthorized", http.StatusUnauthorized)
-		return
+		log.Fatal(err)
+	}
+	if err != nil {
+		log.Fatal(err)
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -189,6 +259,15 @@ func grantsHandler(w http.ResponseWriter, r *http.Request) {
 	if authHeader == "" || !strings.HasPrefix(authHeader, "Bearer ") {
 		http.Error(w, "Unauthorized", http.StatusUnauthorized)
 		return
+	}
+
+	val, err := ValidateToken(authHeader)
+	if !val {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		log.Fatal(err)
+	}
+	if err != nil {
+		log.Fatal(err)
 	}
 
 	conn, err := pgx.Connect(context.Background(), "postgres://dbgr:2110@localhost:5432/dbgr")
@@ -233,8 +312,6 @@ func grantsHandler(w http.ResponseWriter, r *http.Request) {
 		fmt.Printf("Error with query & scanning: %v", err)
 	}
 
-	var FiltersOrder FilterOrder
-
 	DataGrants := struct {
 		Grants         []Grant       `json:"grants"`
 		FiltersMapping FilterMapping `json:"filters_mapping"`
@@ -267,6 +344,15 @@ func grantIDHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	val, err := ValidateToken(authHeader)
+	if !val {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		log.Fatal(err)
+	}
+	if err != nil {
+		log.Fatal(err)
+	}
+
 	conn, err := pgx.Connect(context.Background(), "postgres://dbgr:2110@localhost:5432/dbgr")
 	if err != nil {
 		fmt.Printf("Unable to connect to database: %v\n", err)
@@ -295,8 +381,6 @@ func grantIDHandler(w http.ResponseWriter, r *http.Request) {
 		fmt.Printf("Error with query & scanning: %v", err)
 	}
 
-	var FiltersOrder FilterOrder
-
 	DataGrantID := struct {
 		GrantID         Grant         `json:"grant"`
 		FilterMappingID FilterMapping `json:"filters_mapping"`
@@ -310,6 +394,7 @@ func grantIDHandler(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		fmt.Printf("Error with marshal: %v", err)
 	}
+
 	w.Header().Set("Content-Type", "application/json")
 	w.Write(json)
 }
@@ -324,6 +409,15 @@ func filterHandler(w http.ResponseWriter, r *http.Request) {
 	if authHeader == "" || !strings.HasPrefix(authHeader, "Bearer ") {
 		http.Error(w, "Unauthorized", http.StatusUnauthorized)
 		return
+	}
+
+	val, err := ValidateToken(authHeader)
+	if !val {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		log.Fatal(err)
+	}
+	if err != nil {
+		log.Fatal(err)
 	}
 
 	conn, err := pgx.Connect(context.Background(), "postgres://dbgr:2110@localhost:5432/dbgr")
