@@ -149,7 +149,7 @@ func GenerateToken(myClaims *Claims) ([]byte, error) {
 func ValidateToken(tokenString string) (bool, error) {
 	valMethod := func(t *jwt.Token) (interface{}, error) {
 		if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {
-			return nil, fmt.Errorf("Unexpected signing method: %v", t.Header["alg"])
+			return nil, fmt.Errorf("unexpected signing method: %v", t.Header["alg"])
 		}
 		return []byte(mySigningKey), nil
 	}
@@ -169,28 +169,21 @@ func ValidateToken(tokenString string) (bool, error) {
 }
 
 func loginHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "POST" {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+
 	conn, err := pgx.Connect(context.Background(), "postgres://dbgr:2110@localhost:5432/dbgr")
 	if err != nil {
 		fmt.Printf("Unable to connect to database: %v\n", err)
 	}
 	defer conn.Close(context.Background())
 
-	if r.Method != "POST" {
-		w.WriteHeader(http.StatusMethodNotAllowed)
-		return
-	}
-
 	var ident Identification
 	err = json.NewDecoder(r.Body).Decode(&ident)
 	if err != nil {
 		fmt.Printf("Неверный формат данных: %v", err)
-		return
-	}
-
-	var hashedPassword []byte
-	err = conn.QueryRow(context.Background(), "SELECT password FROM users WHERE login=$1", ident.Login).Scan(&hashedPassword)
-	if err != nil {
-		fmt.Printf("Unindicated: %v", err)
 		return
 	}
 
