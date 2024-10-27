@@ -132,22 +132,14 @@ func main() {
 	http.ListenAndServe(":8080", nil)
 }
 
-func GenerateToken(*Claims) ([]byte, error) {
-	myClaims := &Claims{
-		RegisteredClaims: jwt.RegisteredClaims{},
-		Login:            "admin",
-	}
-
+func GenerateToken(myClaims *Claims) ([]byte, error) {
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, myClaims)
-
-	strToken, err := token.SignedString(mySigningKey)
+	TJWT, err := token.SignedString(mySigningKey)
 	if err != nil {
-		fmt.Printf("error signing token: %v", err)
+		fmt.Printf("Error: %v", err)
 	}
-
-	TokenJson := Token{Token: strToken}
-
-	json, err := json.Marshal(TokenJson)
+	tokenJson := Token{Token: TJWT}
+	json, err := json.Marshal(tokenJson)
 	if err != nil {
 		fmt.Printf("Error with marshal: %v", err)
 	}
@@ -155,28 +147,25 @@ func GenerateToken(*Claims) ([]byte, error) {
 }
 
 func ValidateToken(tokenString string) (bool, error) {
-	ValMethod := func(t *jwt.Token) (interface{}, error) {
-		err := t.Method.(*jwt.SigningMethodHMAC)
-		if err != nil {
-			return fmt.Printf("Method Not Allowed: %v", err)
+	valMethod := func(t *jwt.Token) (interface{}, error) {
+		if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {
+			return nil, fmt.Errorf("Unexpected signing method: %v", t.Header["alg"])
 		}
-		return mySigningKey, nil
+		return []byte(mySigningKey), nil
 	}
-
 	valClaims := &Claims{
 		RegisteredClaims: jwt.RegisteredClaims{},
 		Login:            "admin",
 	}
 
-	parsedToken, err := jwt.ParseWithClaims(tokenString, valClaims, ValMethod)
+	parsedToken, err := jwt.ParseWithClaims(tokenString, valClaims, valMethod)
 	if err != nil {
-		log.Fatalf("Ошибка разбора: %v", err)
+		log.Fatalf("Parsing error: %v", err)
 	}
 	if !parsedToken.Valid {
-		log.Fatalf("Недействительный токен")
+		log.Fatalf("Invalid token")
 	}
 	return true, nil
-
 }
 
 func loginHandler(w http.ResponseWriter, r *http.Request) {
@@ -208,22 +197,25 @@ func loginHandler(w http.ResponseWriter, r *http.Request) {
 	var isValid bool
 	err = conn.QueryRow(context.Background(), "SELECT crypt($1, password) = password FROM users WHERE login = $2", ident.Password, ident.Login).Scan(&isValid)
 	if err != nil {
-		fmt.Printf("Unauthorized: %v", err)
+		fmt.Printf("Error with query: %v", err)
 		return
 	}
 
-	myClaims := &Claims{
-		RegisteredClaims: jwt.RegisteredClaims{},
-		Login:            ident.Login,
-	}
+	if isValid {
+		myClaims := &Claims{
+			RegisteredClaims: jwt.RegisteredClaims{},
+			Login:            ident.Login,
+		}
 
-	jsonToken, err := GenerateToken(myClaims)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		token, err := GenerateToken(myClaims)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Write(token)
+	} else {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
 	}
-
-	w.Header().Set("Content-Type", "application/json")
-	w.Write(jsonToken)
 }
 
 func checkHandler(w http.ResponseWriter, r *http.Request) {
@@ -232,13 +224,9 @@ func checkHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	authHeader := r.Header.Get("Authorization")
-	if authHeader == "" || !strings.HasPrefix(authHeader, "Bearer ") {
-		http.Error(w, "Unauthorized", http.StatusUnauthorized)
-		return
-	}
-
-	val, err := ValidateToken(authHeader)
+	tokenString := r.Header.Get("Authorization")
+	tokenString = strings.TrimPrefix(tokenString, "Bearer ")
+	val, err := ValidateToken(tokenString)
 	if !val {
 		http.Error(w, "Unauthorized", http.StatusUnauthorized)
 		log.Fatal(err)
@@ -255,13 +243,9 @@ func grantsHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	authHeader := r.Header.Get("Authorization")
-	if authHeader == "" || !strings.HasPrefix(authHeader, "Bearer ") {
-		http.Error(w, "Unauthorized", http.StatusUnauthorized)
-		return
-	}
-
-	val, err := ValidateToken(authHeader)
+	tokenString := r.Header.Get("Authorization")
+	tokenString = strings.TrimPrefix(tokenString, "Bearer ")
+	val, err := ValidateToken(tokenString)
 	if !val {
 		http.Error(w, "Unauthorized", http.StatusUnauthorized)
 		log.Fatal(err)
@@ -338,13 +322,9 @@ func grantIDHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	authHeader := r.Header.Get("Authorization")
-	if authHeader == "" || !strings.HasPrefix(authHeader, "Bearer ") {
-		http.Error(w, "Unauthorized", http.StatusUnauthorized)
-		return
-	}
-
-	val, err := ValidateToken(authHeader)
+	tokenString := r.Header.Get("Authorization")
+	tokenString = strings.TrimPrefix(tokenString, "Bearer ")
+	val, err := ValidateToken(tokenString)
 	if !val {
 		http.Error(w, "Unauthorized", http.StatusUnauthorized)
 		log.Fatal(err)
@@ -405,13 +385,9 @@ func filterHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	authHeader := r.Header.Get("Authorization")
-	if authHeader == "" || !strings.HasPrefix(authHeader, "Bearer ") {
-		http.Error(w, "Unauthorized", http.StatusUnauthorized)
-		return
-	}
-
-	val, err := ValidateToken(authHeader)
+	tokenString := r.Header.Get("Authorization")
+	tokenString = strings.TrimPrefix(tokenString, "Bearer ")
+	val, err := ValidateToken(tokenString)
 	if !val {
 		http.Error(w, "Unauthorized", http.StatusUnauthorized)
 		log.Fatal(err)
