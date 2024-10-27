@@ -1,6 +1,8 @@
-package main
+package handlers
 
 import (
+	"backend_project/config"
+	"backend_project/structs"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -11,134 +13,30 @@ import (
 
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/jackc/pgx/v5"
+	"github.com/joho/godotenv"
 )
 
-type Claims struct {
-	jwt.RegisteredClaims
-	Login string `json:"login"`
+func init() {
+	err := godotenv.Load()
+	if err != nil {
+		log.Fatalf("Error loading .env file: %v", err)
+	}
 }
 
-var mySigningKey = []byte("secret_key")
+var conf = config.GetEnv()
+var Key = conf.SecretKey
+var DB = conf.Database
 
-type Identification struct {
-	Id       int    `json:"id"`
-	Login    string `json:"login"`
-	Password string `json:"password"`
-}
+var FiltersOrder structs.FilterOrder = structs.FilterOrder{"project_direction", "amount", "legal_form", "age", "cutting_off_criteria"}
 
-type Token struct {
-	Token string `json:"token"`
-}
-
-type Grant struct {
-	ID           int    `json:"id"`
-	Title        string `json:"title"`
-	SourceURL    string `json:"source_url"`
-	FilterValues struct {
-		CuttingOffCriteria []int `json:"cutting_off_criteria"`
-		ProjectDirection   []int `json:"project_direction"`
-		Amount             int   `json:"amount"`
-		LegalForm          []int `json:"legal_form"`
-		Age                int   `json:"age"`
-	} `json:"filter_values"`
-}
-
-type FilterMapping struct {
-	Age struct {
-		Title   string `json:"title"`
-		Mapping struct {
-		} `json:"mapping"`
-	} `json:"age"`
-	ProjectDirection struct {
-		Title   string `json:"title"`
-		Mapping struct {
-			Num0 struct {
-				Title string `json:"title"`
-			} `json:"0"`
-			Num1 struct {
-				Title string `json:"title"`
-			} `json:"1"`
-			Num2 struct {
-				Title string `json:"title"`
-			} `json:"2"`
-			Num3 struct {
-				Title string `json:"title"`
-			} `json:"3"`
-		} `json:"mapping"`
-	} `json:"project_direction"`
-	LegalForm struct {
-		Title   string `json:"title"`
-		Mapping struct {
-			Num0 struct {
-				Title string `json:"title"`
-			} `json:"0"`
-			Num1 struct {
-				Title string `json:"title"`
-			} `json:"1"`
-			Num2 struct {
-				Title string `json:"title"`
-			} `json:"2"`
-		} `json:"mapping"`
-	} `json:"legal_form"`
-	CuttingOffCriteria struct {
-		Title   string `json:"title"`
-		Mapping struct {
-			Num0 struct {
-				Title string `json:"title"`
-			} `json:"0"`
-			Num1 struct {
-				Title string `json:"title"`
-			} `json:"1"`
-			Num2 struct {
-				Title string `json:"title"`
-			} `json:"2"`
-			Num3 struct {
-				Title string `json:"title"`
-			} `json:"3"`
-		} `json:"mapping"`
-	} `json:"cutting_off_criteria"`
-	Amount struct {
-		Title   string `json:"title"`
-		Mapping struct {
-		} `json:"mapping"`
-	} `json:"amount"`
-}
-
-type FilterOrder []string
-
-var FiltersOrder FilterOrder = FilterOrder{"project_direction", "amount", "legal_form", "age", "cutting_off_criteria"}
-
-type MetaPages struct {
-	CurrentPage int `json:"current_page"`
-	TotalPages  int `json:"total_pages"`
-}
-
-type DataFilters struct {
-	Data struct {
-		ProjectDirection   []int `json:"project_direction"`
-		Amount             int   `json:"amount"`
-		LegalForm          []int `json:"legal_form"`
-		Age                int   `json:"age"`
-		CuttingOffCriteria []int `json:"cutting_off_criteria"`
-	} `json:"data"`
-}
-
-func main() {
-	http.HandleFunc("/login", loginHandler)
-	http.HandleFunc("/check", checkHandler)
-	http.HandleFunc("/grants", grantsHandler)
-	http.HandleFunc("/grants/{id}", grantIDHandler)
-	http.HandleFunc("/grants/{id}/filters", filterHandler)
-	http.ListenAndServe(":8080", nil)
-}
-
-func GenerateToken(myClaims *Claims) ([]byte, error) {
+func GenerateToken(myClaims *structs.Claims) ([]byte, error) {
+	var mySigningKey = []byte(Key)
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, myClaims)
 	TJWT, err := token.SignedString(mySigningKey)
 	if err != nil {
 		fmt.Printf("Error: %v", err)
 	}
-	tokenJson := Token{Token: TJWT}
+	tokenJson := structs.Token{Token: TJWT}
 	json, err := json.Marshal(tokenJson)
 	if err != nil {
 		fmt.Printf("Error with marshal: %v", err)
@@ -147,13 +45,14 @@ func GenerateToken(myClaims *Claims) ([]byte, error) {
 }
 
 func ValidateToken(tokenString string) (bool, error) {
+	var mySigningKey = []byte(Key)
 	valMethod := func(t *jwt.Token) (interface{}, error) {
 		if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {
 			return nil, fmt.Errorf("unexpected signing method: %v", t.Header["alg"])
 		}
 		return []byte(mySigningKey), nil
 	}
-	valClaims := &Claims{
+	valClaims := &structs.Claims{
 		RegisteredClaims: jwt.RegisteredClaims{},
 		Login:            "admin",
 	}
@@ -168,19 +67,19 @@ func ValidateToken(tokenString string) (bool, error) {
 	return true, nil
 }
 
-func loginHandler(w http.ResponseWriter, r *http.Request) {
+func LoginHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != "POST" {
 		w.WriteHeader(http.StatusMethodNotAllowed)
 		return
 	}
 
-	conn, err := pgx.Connect(context.Background(), "postgres://dbgr:2110@localhost:5432/dbgr")
+	conn, err := pgx.Connect(context.Background(), DB)
 	if err != nil {
 		fmt.Printf("Unable to connect to database: %v\n", err)
 	}
 	defer conn.Close(context.Background())
 
-	var ident Identification
+	var ident structs.Identification
 	err = json.NewDecoder(r.Body).Decode(&ident)
 	if err != nil {
 		fmt.Printf("Неверный формат данных: %v", err)
@@ -195,7 +94,7 @@ func loginHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if isValid {
-		myClaims := &Claims{
+		myClaims := &structs.Claims{
 			RegisteredClaims: jwt.RegisteredClaims{},
 			Login:            ident.Login,
 		}
@@ -211,7 +110,7 @@ func loginHandler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func checkHandler(w http.ResponseWriter, r *http.Request) {
+func CheckHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != "POST" {
 		w.WriteHeader(http.StatusMethodNotAllowed)
 		return
@@ -230,7 +129,7 @@ func checkHandler(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func grantsHandler(w http.ResponseWriter, r *http.Request) {
+func GrantsHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != "GET" {
 		w.WriteHeader(http.StatusMethodNotAllowed)
 		return
@@ -247,7 +146,7 @@ func grantsHandler(w http.ResponseWriter, r *http.Request) {
 		log.Fatal(err)
 	}
 
-	conn, err := pgx.Connect(context.Background(), "postgres://dbgr:2110@localhost:5432/dbgr")
+	conn, err := pgx.Connect(context.Background(), DB)
 	if err != nil {
 		fmt.Printf("Unable to connect to database: %v\n", err)
 	}
@@ -259,8 +158,8 @@ func grantsHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	defer rows.Close()
 
-	var Grants []Grant
-	var grantItem Grant
+	var Grants []structs.Grant
+	var grantItem structs.Grant
 	for rows.Next() {
 		if err := rows.Scan(&grantItem.ID, &grantItem.Title, &grantItem.SourceURL,
 			&grantItem.FilterValues.ProjectDirection, &grantItem.FilterValues.Amount,
@@ -271,7 +170,7 @@ func grantsHandler(w http.ResponseWriter, r *http.Request) {
 		Grants = append(Grants, grantItem)
 	}
 
-	var FiltersMapping FilterMapping
+	var FiltersMapping structs.FilterMapping
 	err = conn.QueryRow(context.Background(), "SELECT * FROM filters_mapping").Scan(
 		&FiltersMapping.Age,
 		&FiltersMapping.ProjectDirection,
@@ -282,7 +181,7 @@ func grantsHandler(w http.ResponseWriter, r *http.Request) {
 		fmt.Printf("Error with query & scanning: %v", err)
 	}
 
-	var Meta MetaPages
+	var Meta structs.MetaPages
 	err = conn.QueryRow(context.Background(), "SELECT * FROM meta").Scan(
 		&Meta.CurrentPage, &Meta.TotalPages)
 	if err != nil {
@@ -290,10 +189,10 @@ func grantsHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	DataGrants := struct {
-		Grants         []Grant       `json:"grants"`
-		FiltersMapping FilterMapping `json:"filters_mapping"`
-		FiltersOrder   FilterOrder   `json:"filters_order"`
-		Meta           MetaPages     `json:"meta"`
+		Grants         []structs.Grant       `json:"grants"`
+		FiltersMapping structs.FilterMapping `json:"filters_mapping"`
+		FiltersOrder   structs.FilterOrder   `json:"filters_order"`
+		Meta           structs.MetaPages     `json:"meta"`
 	}{
 		Grants:         Grants,
 		FiltersMapping: FiltersMapping,
@@ -309,7 +208,7 @@ func grantsHandler(w http.ResponseWriter, r *http.Request) {
 	w.Write(json)
 }
 
-func grantIDHandler(w http.ResponseWriter, r *http.Request) {
+func GrantIDHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != "GET" {
 		w.WriteHeader(http.StatusMethodNotAllowed)
 		return
@@ -326,13 +225,13 @@ func grantIDHandler(w http.ResponseWriter, r *http.Request) {
 		log.Fatal(err)
 	}
 
-	conn, err := pgx.Connect(context.Background(), "postgres://dbgr:2110@localhost:5432/dbgr")
+	conn, err := pgx.Connect(context.Background(), DB)
 	if err != nil {
 		fmt.Printf("Unable to connect to database: %v\n", err)
 	}
 	defer conn.Close(context.Background())
 
-	var GrantID Grant
+	var GrantID structs.Grant
 	ID := r.PathValue("id")
 	err = conn.QueryRow(context.Background(), "SELECT * FROM grants WHERE id = $1", ID).Scan(
 		&GrantID.ID, &GrantID.Title, &GrantID.SourceURL,
@@ -343,7 +242,7 @@ func grantIDHandler(w http.ResponseWriter, r *http.Request) {
 		fmt.Printf("Error with query & scanning: %v", err)
 	}
 
-	var FilterMappingID FilterMapping
+	var FilterMappingID structs.FilterMapping
 	err = conn.QueryRow(context.Background(), "SELECT * FROM filters_mapping").Scan(
 		&FilterMappingID.Age,
 		&FilterMappingID.ProjectDirection,
@@ -355,9 +254,9 @@ func grantIDHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	DataGrantID := struct {
-		GrantID         Grant         `json:"grant"`
-		FilterMappingID FilterMapping `json:"filters_mapping"`
-		FiltersOrder    FilterOrder   `json:"filters_order"`
+		GrantID         structs.Grant         `json:"grant"`
+		FilterMappingID structs.FilterMapping `json:"filters_mapping"`
+		FiltersOrder    structs.FilterOrder   `json:"filters_order"`
 	}{
 		GrantID:         GrantID,
 		FilterMappingID: FilterMappingID,
@@ -372,7 +271,7 @@ func grantIDHandler(w http.ResponseWriter, r *http.Request) {
 	w.Write(json)
 }
 
-func filterHandler(w http.ResponseWriter, r *http.Request) {
+func FilterHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != "PUT" {
 		w.WriteHeader(http.StatusMethodNotAllowed)
 		return
@@ -389,13 +288,13 @@ func filterHandler(w http.ResponseWriter, r *http.Request) {
 		log.Fatal(err)
 	}
 
-	conn, err := pgx.Connect(context.Background(), "postgres://dbgr:2110@localhost:5432/dbgr")
+	conn, err := pgx.Connect(context.Background(), DB)
 	if err != nil {
 		fmt.Printf("Unable to connect to database: %v\n", err)
 	}
 	defer conn.Close(context.Background())
 
-	var DataID DataFilters
+	var DataID structs.DataFilters
 	err = json.NewDecoder(r.Body).Decode(&DataID)
 	if err != nil {
 		fmt.Printf("Неверный формат данных: %v", err)
