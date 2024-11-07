@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"backend_project/config"
+	conndb "backend_project/db"
 	"backend_project/structs"
 	"context"
 	"encoding/json"
@@ -11,7 +12,6 @@ import (
 	"strings"
 
 	"github.com/golang-jwt/jwt/v5"
-	"github.com/jackc/pgx/v5"
 	"github.com/joho/godotenv"
 )
 
@@ -24,25 +24,11 @@ func init() {
 
 var conf = config.GetEnv()
 var Key = conf.SecretKey
-var DB = conf.Database
+var db *conndb.Database
 
-var err error
-var conn *pgx.Conn
-
-// func InitDB() (*pgx.Conn, error) {
-// 	conn, err := pgx.Connect(context.Background(), DB)
-// 	if err != nil {
-// 		return nil, err
-// 	}
-// 	return conn, nil
-// }
-
-// func closeDB(conn *pgx.Conn) {
-// 	err := conn.Close(context.Background())
-// 	if err != nil {
-// 		fmt.Println("Ошибка при закрытии соединения:", err)
-// 	}
-// }
+func SetDatabase(database *conndb.Database) {
+	db = database
+}
 
 var FiltersOrder structs.FilterOrder = structs.FilterOrder{"project_direction", "amount", "legal_form", "age", "cutting_off_criteria"}
 
@@ -90,16 +76,8 @@ func LoginHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	conn, err := pgx.Connect(context.Background(), DB)
-	if err != nil {
-		http.Error(w, "Unable to connect to database", http.StatusInternalServerError)
-		fmt.Printf("Unable to connect to database: %v\n", err)
-		return
-	}
-	defer conn.Close(context.Background())
-
 	var ident structs.Identification
-	err = json.NewDecoder(r.Body).Decode(&ident)
+	err := json.NewDecoder(r.Body).Decode(&ident)
 	if err != nil {
 		http.Error(w, "Invalid input format", http.StatusBadRequest)
 		fmt.Printf("Invalid data format: %v", err)
@@ -107,7 +85,7 @@ func LoginHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var isValid bool
-	err = conn.QueryRow(context.Background(), "SELECT crypt($1, password) = password FROM users WHERE login = $2", ident.Password, ident.Login).Scan(&isValid)
+	err = db.Conn.QueryRow(context.Background(), "SELECT crypt($1, password) = password FROM users WHERE login = $2", ident.Password, ident.Login).Scan(&isValid)
 	if err != nil {
 		http.Error(w, "Database query error", http.StatusInternalServerError)
 		fmt.Printf("Error with query: %v", err)
@@ -164,15 +142,7 @@ func GrantsHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	conn, err := pgx.Connect(context.Background(), DB)
-	if err != nil {
-		http.Error(w, "Unable to connect to database", http.StatusInternalServerError)
-		fmt.Printf("Unable to connect to database: %v\n", err)
-		return
-	}
-	defer conn.Close(context.Background())
-
-	rows, err := conn.Query(context.Background(), "SELECT * FROM grants")
+	rows, err := db.Conn.Query(context.Background(), "SELECT * FROM grants")
 	if err != nil {
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 		fmt.Printf("Error with query: %v", err)
@@ -195,7 +165,7 @@ func GrantsHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var FiltersMapping structs.FilterMapping
-	err = conn.QueryRow(context.Background(), "SELECT * FROM filters_mapping").Scan(
+	err = db.Conn.QueryRow(context.Background(), "SELECT * FROM filters_mapping").Scan(
 		&FiltersMapping.Age,
 		&FiltersMapping.ProjectDirection,
 		&FiltersMapping.LegalForm,
@@ -208,7 +178,7 @@ func GrantsHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var Meta structs.MetaPages
-	err = conn.QueryRow(context.Background(), "SELECT * FROM meta").Scan(
+	err = db.Conn.QueryRow(context.Background(), "SELECT * FROM meta").Scan(
 		&Meta.CurrentPage, &Meta.TotalPages)
 	if err != nil {
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
@@ -253,16 +223,9 @@ func GrantIDHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	conn, err := pgx.Connect(context.Background(), DB)
-	if err != nil {
-		http.Error(w, "Unable to connect to database", http.StatusInternalServerError)
-		fmt.Printf("Unable to connect to database: %v\n", err)
-	}
-	defer conn.Close(context.Background())
-
 	var GrantID structs.Grant
 	ID := r.PathValue("id")
-	err = conn.QueryRow(context.Background(), "SELECT * FROM grants WHERE id = $1", ID).Scan(
+	err = db.Conn.QueryRow(context.Background(), "SELECT * FROM grants WHERE id = $1", ID).Scan(
 		&GrantID.ID, &GrantID.Title, &GrantID.SourceURL,
 		&GrantID.FilterValues.ProjectDirection, &GrantID.FilterValues.Amount,
 		&GrantID.FilterValues.LegalForm, &GrantID.FilterValues.Age,
@@ -274,7 +237,7 @@ func GrantIDHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var FilterMappingID structs.FilterMapping
-	err = conn.QueryRow(context.Background(), "SELECT * FROM filters_mapping").Scan(
+	err = db.Conn.QueryRow(context.Background(), "SELECT * FROM filters_mapping").Scan(
 		&FilterMappingID.Age,
 		&FilterMappingID.ProjectDirection,
 		&FilterMappingID.LegalForm,
@@ -321,13 +284,6 @@ func FilterHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	conn, err := pgx.Connect(context.Background(), DB)
-	if err != nil {
-		http.Error(w, "Unable to connect to database", http.StatusInternalServerError)
-		fmt.Printf("Unable to connect to database: %v\n", err)
-	}
-	defer conn.Close(context.Background())
-
 	var DataID structs.DataFilters
 	err = json.NewDecoder(r.Body).Decode(&DataID)
 	if err != nil {
@@ -344,7 +300,7 @@ func FilterHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	request, err := conn.Exec(context.Background(), "UPDATE grants SET project_directions = $1, amount = $2, legal_forms = $3, age = $4, cutting_off_criterea = $5 WHERE id = $6",
+	request, err := db.Conn.Exec(context.Background(), "UPDATE grants SET project_directions = $1, amount = $2, legal_forms = $3, age = $4, cutting_off_criterea = $5 WHERE id = $6",
 		&DataID.Data.ProjectDirection, &DataID.Data.Amount, &DataID.Data.LegalForm, &DataID.Data.Age, &DataID.Data.CuttingOffCriteria, intID)
 	if err != nil {
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
