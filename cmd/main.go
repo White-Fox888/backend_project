@@ -14,7 +14,6 @@ func main() {
 	http.HandleFunc("/grants", handlers.GrantsHandler)
 	http.HandleFunc("/grants/{id}", handlers.GrantIDHandler)
 	http.HandleFunc("/grants/{id}/filters", handlers.FilterHandler)
-	http.ListenAndServe(":8080", nil)
 
 	var conf = config.GetEnv()
 	var DB = conf.Database
@@ -27,4 +26,6 @@ func main() {
 	defer db.Close()
 
 	handlers.SetDatabase(db)
+
+	http.ListenAndServe(":8080", nil)
 }

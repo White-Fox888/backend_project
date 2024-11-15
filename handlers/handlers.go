@@ -23,7 +23,7 @@ func init() {
 }
 
 var conf = config.GetEnv()
-var Key = conf.SecretKey
+var mySigningKey = []byte(conf.SecretKey)
 var db *conndb.Database
 
 func SetDatabase(database *conndb.Database) {
@@ -33,11 +33,10 @@ func SetDatabase(database *conndb.Database) {
 var FiltersOrder structs.FilterOrder = structs.FilterOrder{"project_direction", "amount", "legal_form", "age", "cutting_off_criteria"}
 
 func GenerateToken(myClaims *structs.Claims) ([]byte, error) {
-	var mySigningKey = []byte(Key)
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, myClaims)
 	TJWT, err := token.SignedString(mySigningKey)
 	if err != nil {
-		fmt.Printf("Error: %v", err)
+		fmt.Printf("Error with signed JWT: %v", err)
 	}
 	tokenJson := structs.Token{Token: TJWT}
 	json, err := json.Marshal(tokenJson)
@@ -48,7 +47,6 @@ func GenerateToken(myClaims *structs.Claims) ([]byte, error) {
 }
 
 func ValidateToken(tokenString string) (bool, error) {
-	var mySigningKey = []byte(Key)
 	valMethod := func(t *jwt.Token) (interface{}, error) {
 		if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {
 			return nil, fmt.Errorf("unexpected signing method: %v", t.Header["alg"])
