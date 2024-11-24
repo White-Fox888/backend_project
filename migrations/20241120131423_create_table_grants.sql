@@ -1,4 +1,5 @@
 -- +goose Up
+-- +goose StatementBegin
 CREATE TABLE grants (
     id SERIAL PRIMARY KEY,
     title text,
@@ -9,12 +10,9 @@ CREATE TABLE grants (
     age integer,
     cutting_off_criterea jsonb
 );
--- +goose StatementBegin
-SELECT 'up SQL query';
 -- +goose StatementEnd
 
 -- +goose Down
-DROP TABLE grants;
 -- +goose StatementBegin
-SELECT 'down SQL query';
+DROP TABLE grants;
 -- +goose StatementEnd

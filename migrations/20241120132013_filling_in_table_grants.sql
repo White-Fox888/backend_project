@@ -1,6 +1,7 @@
 -- +goose Up
+-- +goose StatementBegin
 INSERT INTO grants (id, title, source_url, project_directions, amount, legal_forms, age, cutting_off_criterea) VALUES 
-(1, 'Стипендиальный конкурс' 'https://fondpotanin.ru/competitions/fellowships/', '[]', 0, '[]', 0, '[]');
+(1, 'Стипендиальный конкурс', 'https://fondpotanin.ru/competitions/fellowships/', '[]', 0, '[]', 0, '[]');
 INSERT INTO grants (id, title, source_url, project_directions, amount, legal_forms, age, cutting_off_criterea) VALUES 
 (2, 'Спорт для всех', 'https://fondpotanin.ru/competitions/sport-dlya-vsekh/', '[]', 0, '[]', 0, '[]');
 INSERT INTO grants (id, title, source_url, project_directions, amount, legal_forms, age, cutting_off_criterea) VALUES 
@@ -39,12 +40,9 @@ INSERT INTO grants (id, title, source_url, project_directions, amount, legal_for
 (19, 'Конкурс на поддержку центров социальных инноваций в сфере культуры', 'https://fondpotanin.ru/competitions/konkurs-na-podderzhku-tsentrov-sotsialnykh-innovatsiy-v-sfere-kultury/', '[]', 0, '[]', 0, '[]');
 INSERT INTO grants (id, title, source_url, project_directions, amount, legal_forms, age, cutting_off_criterea) VALUES 
 (20, 'Конкурс по приглашению для грантополучателей антикризисных конкурсов', 'https://fondpotanin.ru/competitions/konkurs-po-priglasheniyu-dlya-grantopoluchateley-antikrizisnykh-konkursov/', '[]', 0, '[]', 0, '[]');
--- +goose StatementBegin
-SELECT 'up SQL query';
 -- +goose StatementEnd
 
 -- +goose Down
-DELETE FROM grants;
 -- +goose StatementBegin
-SELECT 'down SQL query';
+DELETE FROM grants;
 -- +goose StatementEnd
